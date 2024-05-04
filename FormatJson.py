@@ -52,14 +52,34 @@ def create_table_with_json(doc, json_str):
 
 
 def process_document(doc_path, save_path):
+    """
+    同时处理段落和表格中的 JSON
+    :param doc_path: 原文档路径
+    :param save_path: 保存路径
+    :return:
+    """
     doc = Document(doc_path)
 
+    # 首先处理文档中的段落
+    process_elements(doc.paragraphs, doc)
+
+    # 然后处理文档中的表格
+    for i, table in enumerate(doc.tables):
+        for row in table.rows:
+            for cell in row.cells:
+                process_elements(cell.paragraphs, doc, (i, row, cell))
+
+    # 保存文档
+    doc.save(save_path)
+
+
+def process_elements(elements, doc, table_info=None):
     json_str = ""
     json_paragraphs = []  # 用于存储包含 JSON 字符串的段落
     stack = []  # 使用栈来跟踪 JSON 对象的开始和结束
 
     # 查找并处理未被表格包裹的JSON字符串
-    for para in doc.paragraphs:
+    for para in elements:
         for char in para.text:
             if char == "{":
                 stack.append("{")  # 将 "{" 压入栈中
@@ -80,14 +100,20 @@ def process_document(doc_path, save_path):
                             if not any(run._r.xml for run in para.runs if '<w:tbl' in run._r.xml):
                                 # 创建新表格
                                 new_table = create_table_with_json(doc, json_str)
-                                # 在第一个 json_paragraph 的位置插入新表格
-                                p = json_paragraphs[0]._element
-                                p.getparent().insert(p.getparent().index(p) + 1, new_table._element)
+                                if table_info:  # 如果我们正在处理表格
+                                    # 替换旧表格
+                                    i, row, cell = table_info
+                                    old_table = doc.tables[i]
+                                    p = old_table._element.getparent()
+                                    p.insert(p.index(old_table._element), new_table._element)
+                                    p.remove(old_table._element)
+                                else:
+                                    # 在第一个 json_paragraph 的位置插入新表格
+                                    p = json_paragraphs[0]._element
+                                    p.getparent().insert(p.getparent().index(p) + 1, new_table._element)
                                 # 清除包含 JSON 字符串的段落的内容
                                 for p in json_paragraphs:
-                                    # print(f"删除：{p.text}")
                                     p.clear()
-                                    # 不删除会留白
                                     p._element.getparent().remove(p._element)  # 从父元素中删除段落
                         else:
                             print(f"无效 JSON: {json_str}")
@@ -101,9 +127,6 @@ def process_document(doc_path, save_path):
                 json_str += char
                 if para not in json_paragraphs:
                     json_paragraphs.append(para)  # 添加包含 JSON 字符串的段落
-
-    # 保存文档
-    doc.save(save_path)
 
 
 # 使用示例
